@@ -1,0 +1,405 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Install lucide-react-native",
+			"type": "shell",
+			"command": "npm install lucide-react-native",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run Jest tests",
+			"type": "shell",
+			"command": "npm test -- --runInBand --watch=false",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run App test only",
+			"type": "shell",
+			"command": "npx jest __tests__/App.test.tsx --runInBand --watch=false --verbose --detectOpenHandles",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run full Jest suite",
+			"type": "shell",
+			"command": "npx jest --runInBand --watch=false",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Inspect installed Lucide files",
+			"type": "shell",
+			"command": "node -e \"const fs=require('fs');const p=require.resolve('lucide-react-native/package.json');const j=require(p);console.log(p,j.version,j.main,j.module,j.exports);const d=require('path').dirname(p);console.log(fs.readdirSync(d));console.log(fs.existsSync(require('path').join(d,'dist/esm/icons/accessibility.mjs')));\"",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Inspect Lucide install",
+			"type": "shell",
+			"command": "npm ls lucide-react-native --depth=0; node -p \"require.resolve('lucide-react-native')\"",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Install stable Lucide version",
+			"type": "shell",
+			"command": "npm install lucide-react-native@0.468.0",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check Lucide peer support",
+			"type": "shell",
+			"command": "npm view lucide-react-native@0.577.0 peerDependencies --json; npm view lucide-react-native@0.563.0 peerDependencies --json; npm view lucide-react-native@1.0.0 peerDependencies --json",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Install compatible Lucide",
+			"type": "shell",
+			"command": "npm install lucide-react-native@0.577.0",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Verify Android Metro bundle",
+			"type": "shell",
+			"command": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output $env:TEMP\\attendsync-validation.bundle",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run focused app tests",
+			"type": "shell",
+			"command": "npx jest --runInBand --watch=false",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Remove temporary bundle",
+			"type": "shell",
+			"command": "Remove-Item -LiteralPath \"$env:TEMP\\attendsync-validation.bundle\" -ErrorAction Stop",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check attendance image bundle",
+			"type": "shell",
+			"command": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output $env:TEMP\\attendsync-image-preview.bundle",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Clean image preview bundle",
+			"type": "shell",
+			"command": "Remove-Item -LiteralPath \"$env:TEMP\\attendsync-image-preview.bundle\" -ErrorAction Stop",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run attendance tests",
+			"type": "shell",
+			"command": "npx jest __tests__/attendanceFormat.test.js --runInBand --watch=false",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check AttendanceScreen syntax",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Lint attendance screen",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Lint AttendanceScreen",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify Android bundle syntax",
+			"type": "shell",
+			"command": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output $env:TEMP\\attendsync-attendance-syntax.bundle",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Clean validation bundle",
+			"type": "shell",
+			"command": "Remove-Item -LiteralPath \"$env:TEMP\\attendsync-attendance-syntax.bundle\" -ErrorAction Stop",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check connected Android device",
+			"type": "shell",
+			"command": "adb devices",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Read photo preview device logs",
+			"type": "shell",
+			"command": "adb logcat -d -t 3000 | Select-String -Pattern 'ATTENDSYNC|Fresco|ReactImage|ImagePipeline|ImageRequest|Unable to load|Failed to load' | Select-Object -Last 100",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Capture attendance image logs",
+			"type": "shell",
+			"command": "adb logcat -v time -T 1 | Select-String -Pattern 'ATTENDSYNC|Fresco|ReactImage|ImagePipeline|ImageRequest|ReactNativeJS|Unable to load|Failed to load'",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Read captured image URI logs",
+			"type": "shell",
+			"command": "adb logcat -d -t 5000 | Select-String -Pattern 'CAPTURE RESULT|PHOTO ASSET|REVIEW PHOTO URI|PHOTO PREVIEW|ATTENDSYNC|ReactImageManager|ReactImageView|Fresco|ImagePipeline|ImageRequest' | Select-Object -Last 100",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Read React Native JavaScript logs",
+			"type": "shell",
+			"command": "adb logcat -d -t 3000 | Select-String -Pattern 'ReactNativeJS|com.attendsyncmobile|Camera|image_picker|PHOTO|URI|Fresco' | Select-Object -Last 120",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Capture Android review preview",
+			"type": "shell",
+			"command": "cmd /c \"adb exec-out screencap -p > %TEMP%\\attendsync_review.png\"",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Capture current Android screen",
+			"type": "shell",
+			"command": "node -e 'const fs=require(\"fs\"),cp=require(\"child_process\");fs.writeFileSync(process.env.TEMP+\"\\\\attendsync_review.png\",cp.execFileSync(\"adb\",[\"exec-out\",\"screencap\",\"-p\"]));'",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Save Android screen snapshot",
+			"type": "shell",
+			"command": "$p = New-Object System.Diagnostics.Process; $p.StartInfo.FileName = 'adb'; $p.StartInfo.Arguments = 'exec-out screencap -p'; $p.StartInfo.UseShellExecute = $false; $p.StartInfo.RedirectStandardOutput = $true; $p.Start(); $m = New-Object System.IO.MemoryStream; $p.StandardOutput.BaseStream.CopyTo($m); $p.WaitForExit(); [System.IO.File]::WriteAllBytes(\"$env:TEMP\\attendsync_review.png\", $m.ToArray())",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Save Android screenshot",
+			"type": "shell",
+			"command": "$p = New-Object System.Diagnostics.Process; $p.StartInfo.FileName = 'adb'; $p.StartInfo.Arguments = 'exec-out screencap -p'; $p.StartInfo.UseShellExecute = $false; $p.StartInfo.RedirectStandardOutput = $true; $p.Start(); $m = New-Object System.IO.MemoryStream; $p.StandardOutput.BaseStream.CopyTo($m); $p.WaitForExit(); [System.IO.File]::WriteAllBytes('C:\\Users\\Reychille\\AppData\\Local\\Temp\\attendsync_review.png', $m.ToArray())",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Read local image load logs",
+			"type": "shell",
+			"command": "adb logcat -d -t 5000 | Select-String -Pattern 'CAPTURE RESULT|PHOTO ASSET|REVIEW PHOTO URI|PHOTO PREVIEW|ReactNativeJS|Fresco|ReactImage' | Select-Object -Last 100",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Read current camera preview logs",
+			"type": "shell",
+			"command": "adb logcat -d -t 5000 | Select-String -Pattern 'CAPTURE RESULT|PHOTO ASSET|REVIEW PHOTO URI|PHOTO PREVIEW|ReactNativeJS|Fresco|ReactImage' | Select-Object -Last 100",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Watch live photo preview logs",
+			"type": "shell",
+			"command": "adb logcat -v time | Select-String -Pattern 'CAPTURE RESULT|PHOTO ASSET|REVIEW PHOTO URI|PHOTO PREVIEW|ReactNativeJS|Fresco|ReactImage'",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check captured image file metadata",
+			"type": "shell",
+			"command": "adb shell run-as com.attendsyncmobile ls -l /data/user/0/com.attendsyncmobile/cache/rn_image_picker_lib_temp_14c33c7e-47eb-44b4-8a19-3b31479d98b1.jpg",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Lint proof preview screen",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Lint preview JSX fix",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Lint photo preview component",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify preview JSX lint",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Bundle proof preview change",
+			"type": "shell",
+			"command": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output $env:TEMP\\attendsync-preview-check.bundle",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Remove bundle check artifact",
+			"type": "shell",
+			"command": "Remove-Item -LiteralPath \"$env:TEMP\\attendsync-preview-check.bundle\" -ErrorAction Stop",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Bundle attendance timeout flow",
+			"type": "shell",
+			"command": "npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output $env:TEMP\\attendsync-timeout-check.bundle",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Lint timeout screen",
+			"type": "shell",
+			"command": "npx eslint src/screens/AttendanceScreen.jsx",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Clean timeout validation file",
+			"type": "shell",
+			"command": "Remove-Item -LiteralPath \"$env:TEMP\\attendsync-timeout-check.bundle\" -ErrorAction Stop; Remove-Item -LiteralPath 'C:\\Users\\Reychille\\AppData\\Local\\Temp\\attendsync_review.png' -ErrorAction SilentlyContinue",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Test Laravel Time Out API",
+			"type": "shell",
+			"command": "php C:\\xampp\\htdocs\\attendsync\\artisan test --filter=time_out_",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Test Time Out API backend",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; php artisan test --filter=time_out_",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run focused Laravel Time Out tests",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; php artisan test --filter=time_out_",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Run attendance API suite",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; php artisan test --filter=AttendanceApiTest",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Verify registered attendance routes",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; php artisan route:list --path=api/attendance",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Check Laravel formatting",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; vendor\\bin\\pint --test routes\\api.php app\\Http\\Controllers\\Api\\AttendanceController.php app\\Models\\Attendance.php database\\migrations\\2026_10_07_150000_add_time_out_photo_path_to_attendances_table.php tests\\Feature\\AttendanceApiTest.php",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "PHP lint Time Out changes",
+			"type": "shell",
+			"command": "Set-Location 'C:\\xampp\\htdocs\\attendsync'; php -l routes\\api.php; php -l app\\Http\\Controllers\\Api\\AttendanceController.php; php -l app\\Models\\Attendance.php; php -l database\\migrations\\2026_10_07_150000_add_time_out_photo_path_to_attendances_table.php; php -l tests\\Feature\\AttendanceApiTest.php",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
+		},
+		{
+			"label": "Check backend changed files",
+			"type": "shell",
+			"command": "git -C C:\\xampp\\htdocs\\attendsync --no-pager status --short",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
