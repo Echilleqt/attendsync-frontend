@@ -23,10 +23,21 @@ come only from the returned backend attendance record and are rendered in
 
 Fingerprint enrollment registers and proves a device-bound signing key.
 Android's BiometricPrompt reports generic enrolled device biometrics; it does
-not prove which modality was used. Face recognition is intentionally marked
-unavailable until a trusted identity-match and liveness service is integrated.
-The app does not upload fingerprint or face images/templates. Email/password
-login remains available.
+not prove which modality was used. Face recognition is connected to the Laravel
+backend's `/api/face/*` enrollment and verification endpoints and requires a
+server-side match before attendance can continue. Face enrollment and
+verification use a live front-camera scanner: it detects exactly one face,
+checks for stable open eyes, then requires both eyes to close and reopen before
+capturing the JPEG sent to the existing endpoint. The app does not save
+intermediate camera frames.
+
+The current API receives only the final face image and performs face matching;
+the blink challenge is enforced in the mobile scanner and is not independently
+validated by the server. Do not treat this client-side challenge as
+server-verified anti-spoofing.
+
+The app does not store raw fingerprint images on-device. Email/password login
+remains available.
 
 # Getting Started
 

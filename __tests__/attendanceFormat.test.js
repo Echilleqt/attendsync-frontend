@@ -1,9 +1,24 @@
-import {formatAttendanceDate, formatAttendanceTime} from '../src/utils/attendanceFormat';
+import {
+  formatAttendanceDate,
+  formatAttendanceDateTime,
+  formatAttendanceTime,
+  formatOfficialRecordTimestamp,
+} from '../src/utils/attendanceFormat';
 import {publicKeyPem} from '../src/utils/biometricFormat';
 
 describe('official attendance formatting', () => {
   it('formats the server timestamp in Asia/Manila regardless of the device timezone', () => {
     expect(formatAttendanceTime('2026-10-03T08:15:00+08:00')).toBe('08:15 AM PHT');
+  });
+
+  it('formats combined date and time in the consistent Oct 11, 2026 · 2:35 PM format', () => {
+    expect(formatAttendanceDateTime('2026-10-11T14:35:00+08:00')).toBe('Oct 11, 2026 · 2:35 PM');
+    expect(
+      formatOfficialRecordTimestamp({
+        attendance_date: '2026-10-11',
+        time_in: '2026-10-11T08:05:00+08:00',
+      }, 'time_in')
+    ).toBe('Oct 11, 2026 · 8:05 AM');
   });
 
   describe('biometric public key formatting', () => {

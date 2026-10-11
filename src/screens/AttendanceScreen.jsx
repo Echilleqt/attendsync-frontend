@@ -1,11 +1,8 @@
 import React, {useCallback, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ImageBackground,
-  PermissionsAndroid,
-  Platform,
-  SafeAreaView,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,67 +10,79 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {Camera, CheckCircle, Clock3, RefreshCw} from 'lucide-react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {
+  Camera,
+  CheckCircle,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Fingerprint,
+  History,
+  RefreshCw,
+  ScanFace,
+  ShieldCheck,
+} from 'lucide-react-native';
 import {useFocusEffect} from '@react-navigation/native';
 import ReactNativeBiometrics from 'react-native-biometrics';
-import {launchCamera} from 'react-native-image-picker';
 import {apiRequest} from '../api/client';
 import {
   formatAttendanceDate,
+  formatAttendanceDateTime,
   formatAttendanceTime,
 } from '../utils/attendanceFormat';
-
-const COLORS = {
-  navy: '#102A43',
-  navyDeep: '#0B1F33',
-  blue: '#1769AA',
-  blueLight: '#EAF4FB',
-  canvas: '#F3F6F9',
-  white: '#FFFFFF',
-  text: '#243B53',
-  muted: '#627D98',
-  border: '#D9E2EC',
-  green: '#147D64',
-  greenLight: '#E4F4EF',
-  amber: '#A15C07',
-  amberLight: '#FFF4D6',
-  red: '#B42318',
-  redLight: '#FEF3F2',
-};
+import COLORS from '../theme/colors';
+import AppHeader from '../components/AppHeader';
+import StatusBadge from '../components/StatusBadge';
+import Banner from '../components/Banner';
+import AttendanceCameraModal from '../components/AttendanceCameraModal';
 
 const biometrics = new ReactNativeBiometrics({
   allowDeviceCredentials: false,
 });
 
-function formatCaptureTimestamp(value) {
-  if (!value) {
-    return '';
-  }
-
-  return new Intl.DateTimeFormat('en-PH', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Manila',
-  }).format(value);
-}
-
 export default function AttendanceScreen({token, navigation}) {
+  const insets = useSafeAreaInsets();
+
+  // Core Attendance State
   const [attendance, setAttendance] = useState(null);
+  const [loadingAttendance, setLoadingAttendance] = useState(true);
+  const [refreshError, setRefreshError] = useState('');
+
+  // Biometric Enrollment States
+  const [credentials, setCredentials] = useState([]);
+  const [selectedCredential, setSelectedCredential] = useState(null);
+  const [loadingEnrollment, setLoadingEnrollment] = useState(true);
+  const [enrollmentStatusError, setEnrollmentStatusError] = useState('');
+
+  const [faceStatus, setFaceStatus] = useState({enrolled: false, status: 'not_enrolled'});
+  const [loadingFaceStatus, setLoadingFaceStatus] = useState(true);
+  const [faceStatusError, setFaceStatusError] = useState('');
+
+  // STEP 1: Biometric Method Selection ('fingerprint' | 'face')
+  const [selectedMethod, setSelectedMethod] = useState('fingerprint');
+
+  // STEP 2: Biometric Verification States
+  const [verifying, setVerifying] = useState(false);
+  const [verificationToken, setVerificationToken] = useState(null);
+  const [verifiedMethod, setVerifiedMethod] = useState(null);
+  const [verificationSuccessNotice, setVerificationSuccessNotice] = useState('');
+
+  // STEP 3: In-App Camera Viewfinder Modal State
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+
+  // STEP 4: Captured Photo Preview State
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewImageError, setPreviewImageError] = useState(false);
-  const [captureTime, setCaptureTime] = useState(null);
-  const [verificationToken, setVerificationToken] = useState(null);
   const [pendingAttendanceAction, setPendingAttendanceAction] = useState(null);
-  const [credentials, setCredentials] = useState([]);
-  const [selectedCredential, setSelectedCredential] = useState(null);
-  const [loadingAttendance, setLoadingAttendance] = useState(true);
-  const [loadingEnrollment, setLoadingEnrollment] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [refreshError, setRefreshError] = useState('');
-  const [submissionError, setSubmissionError] = useState('');
-  const [enrollmentStatusError, setEnrollmentStatusError] = useState('');
 
+  // STEP 5: Submission & Confirmation States
+  const [submitting, setSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [submissionSuccessRecord, setSubmissionSuccessRecord] = useState(null);
+
+  // Load Today's Record from authoritative server
   const loadToday = useCallback(async () => {
     if (!token) {
       setAttendance(null);
@@ -88,10 +97,7 @@ export default function AttendanceScreen({token, navigation}) {
       const result = await apiRequest('/attendance/today', token);
       const saved = result.attendance || null;
 
-      if (
-        saved &&
-        (!saved.attendance_date || !saved.time_in || !saved.status)
-      ) {
+      if (saved && (!saved.attendance_date || !saved.time_in || !saved.status)) {
         throw new Error(
           'The server response did not include the saved attendance timestamp.',
         );
@@ -107,6 +113,7 @@ export default function AttendanceScreen({token, navigation}) {
     }
   }, [token]);
 
+  // Load Enrolled Fingerprint Credentials
   const loadBiometricCredentials = useCallback(async () => {
     if (!token) {
       setCredentials([]);
@@ -119,8 +126,7 @@ export default function AttendanceScreen({token, navigation}) {
 
     try {
       const result = await apiRequest('/biometric/credentials', token);
-      const fingerprintCredentials =
-        result.methods?.fingerprint?.credentials;
+      const fingerprintCredentials = result.methods?.fingerprint?.credentials;
 
       if (!Array.isArray(fingerprintCredentials)) {
         throw new Error(
@@ -139,7 +145,6 @@ export default function AttendanceScreen({token, navigation}) {
         ) {
           return current;
         }
-
         return fingerprintCredentials[0] || null;
       });
     } catch (error) {
@@ -154,231 +159,279 @@ export default function AttendanceScreen({token, navigation}) {
     }
   }, [token]);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadToday();
-      loadBiometricCredentials();
-    }, [loadToday, loadBiometricCredentials]),
-  );
-
-  const requestPhoto = async () => {
-    if (Platform.OS === 'android') {
-      const permission = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-      );
-
-      if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
-        throw new Error(
-          'Camera permission is required to capture attendance proof.',
-        );
-      }
-    }
-
-    const result = await launchCamera({
-      mediaType: 'photo',
-      cameraType: 'back',
-      saveToPhotos: false,
-      maxWidth: 1280,
-      maxHeight: 1280,
-      quality: 0.8,
-    });
-
-    console.log(
-      '[ATTENDSYNC] CAPTURE RESULT:',
-      JSON.stringify({
-        didCancel: result.didCancel,
-        errorCode: result.errorCode,
-        errorMessage: result.errorMessage,
-        assets: result.assets?.map(asset => ({
-          uri: asset.uri,
-          originalPath: asset.originalPath,
-          type: asset.type,
-          fileName: asset.fileName,
-          width: asset.width,
-          height: asset.height,
-        })),
-      }),
-    );
-
-    if (result.didCancel) {
-      return null;
-    }
-
-    if (result.errorCode) {
-      throw new Error(
-        result.errorMessage ||
-          'The camera could not capture an attendance photo.',
-      );
-    }
-
-    const photo = result.assets?.[0];
-
-    if (!photo?.uri) {
-      throw new Error('The camera did not return a photo.');
-    }
-
-    /*
-     * IMPORTANT:
-     * Use the URI returned by react-native-image-picker.
-     * This is the URI intended for React Native Image rendering
-     * and FormData upload.
-     */
-    const photoUri = photo.uri;
-
-    console.log(
-      '[ATTENDSYNC] PHOTO ASSET:',
-      JSON.stringify(photo, null, 2),
-    );
-
-    console.log('[ATTENDSYNC] REVIEW PHOTO URI:', photoUri);
-
-    if (!photoUri) {
-      throw new Error(
-        'The camera returned a photo but no usable image URI.',
-      );
-    }
-
-    return {
-      uri: photoUri,
-      name: photo.fileName || `attendance-${Date.now()}.jpg`,
-      type: photo.type || 'image/jpeg',
-    };
-  };
-
-  const verifyAndPrepareAttendance = async action => {
-    if (!token || !selectedCredential) {
-      setSubmissionError(
-        'Set up fingerprint authentication in Profile before recording attendance.',
-      );
+  // Load Enrolled Face Status
+  const loadFaceStatus = useCallback(async () => {
+    if (!token) {
+      setFaceStatus({enrolled: false, status: 'not_enrolled'});
+      setLoadingFaceStatus(false);
       return;
     }
 
-    if (action === 'time-in' && attendance?.time_in) {
-      return;
-    }
-
-    if (action === 'time-out' && !attendance?.time_in) {
-      Alert.alert(
-        'Time Out Unavailable',
-        'Please record your Time In before recording Time Out.',
-      );
-      return;
-    }
-
-    if (action === 'time-out' && attendance?.time_out) {
-      Alert.alert(
-        'Time Out Already Recorded',
-        `Your recorded Time Out is ${formatAttendanceTime(attendance.time_out) || attendance.time_out}.`,
-      );
-      return;
-    }
-
-    setSubmitting(true);
-    setSubmissionError('');
+    setLoadingFaceStatus(true);
+    setFaceStatusError('');
 
     try {
-      const sensor = await biometrics.isSensorAvailable();
+      const result = await apiRequest('/face/status', token);
+      const payload = result?.data ?? result ?? {};
+      const rawStatus =
+        payload.status ??
+        payload.face_status ??
+        payload.enrollment_status ??
+        payload.state ??
+        '';
 
-      if (!sensor.available) {
-        throw new Error(
-          'This device does not have an enrolled biometric configured for secure signing. You can continue using email and password for account access.',
-        );
-      }
+      const isEnrolled =
+        Boolean(
+          payload.enrolled ??
+            payload.is_enrolled ??
+            payload.face_enrolled ??
+            payload.has_face ??
+            payload.registered ??
+            payload.face_registered,
+        ) ||
+        (typeof rawStatus === 'string' &&
+          ['enrolled', 'registered', 'active', 'verified', 'ready'].includes(
+            rawStatus.toLowerCase(),
+          ));
 
-      const challenge = await apiRequest('/biometric/challenges', token, {
-        method: 'POST',
-        body: {
-          verification_method: 'fingerprint',
-          credential_id: selectedCredential.credential_id,
-        },
+      setFaceStatus({
+        enrolled: Boolean(isEnrolled),
+        status:
+          typeof rawStatus === 'string'
+            ? rawStatus
+            : isEnrolled
+            ? 'enrolled'
+            : 'not_enrolled',
       });
+    } catch (error) {
+      setFaceStatus({enrolled: false, status: 'not_enrolled'});
+      setFaceStatusError(error.message || 'Unable to confirm face enrollment status.');
+    } finally {
+      setLoadingFaceStatus(false);
+    }
+  }, [token]);
 
-      const signed = await biometrics.createSignature({
-        promptMessage: `Verify your identity to record ${action === 'time-out' ? 'Time Out' : 'Time In'}`,
-        payload: challenge.message_to_sign,
-      });
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadToday(), loadBiometricCredentials(), loadFaceStatus()]);
+  }, [loadToday, loadBiometricCredentials, loadFaceStatus]);
 
-      if (!signed.success || !signed.signature) {
-        throw new Error(
-          'Biometric verification was cancelled or unsuccessful. No attendance was submitted.',
-        );
-      }
+  useFocusEffect(
+    useCallback(() => {
+      refreshAll();
+    }, [refreshAll]),
+  );
 
-      const verified = await apiRequest('/biometric/verify', token, {
-        method: 'POST',
-        body: {
-          challenge_id: challenge.challenge_id,
-          signature: signed.signature,
-        },
-      });
+  // Determine current transaction type
+  const hasTimeIn = Boolean(attendance?.time_in);
+  const hasTimeOut = Boolean(attendance?.time_out);
+  const currentAction = hasTimeIn ? 'time-out' : 'time-in';
+  const actionLabel = currentAction === 'time-out' ? 'Time Out' : 'Time In';
 
-      if (!verified.biometric_verification_token) {
-        throw new Error(
-          'The server did not confirm biometric verification. No attendance was submitted.',
-        );
-      }
+  // STEP 1: Handle method selection and reset token if method changes
+  const handleSelectMethod = method => {
+    if (method !== selectedMethod) {
+      setSelectedMethod(method);
+      setVerificationToken(null);
+      setVerifiedMethod(null);
+      setVerificationSuccessNotice('');
+      setSubmissionError('');
+    }
+  };
 
-      const photo = await requestPhoto();
+  const handleTriggerAction = () => {
+    if (verificationToken && !capturedPhoto) {
+      setIsCameraOpen(true);
+      return;
+    }
+    executeBiometricVerification();
+  };
 
-      if (!photo) {
+  // STEP 2: Execute Verification for the Selected Biometric Method
+  const executeBiometricVerification = async () => {
+    if (!token) {
+      setSubmissionError('Authentication session expired. Please sign in again.');
+      return;
+    }
+
+    // Business validations before verification
+    if (currentAction === 'time-in' && attendance?.time_in) {
+      setSubmissionError('Time In has already been recorded for today.');
+      return;
+    }
+    if (currentAction === 'time-out' && attendance?.time_out) {
+      setSubmissionError('Time Out has already been recorded for today.');
+      return;
+    }
+    if (currentAction === 'time-out' && !attendance?.time_in) {
+      setSubmissionError('Time In must be recorded before Time Out can be submitted.');
+      return;
+    }
+
+    setSubmissionError('');
+    setVerificationSuccessNotice('');
+    setVerificationToken(null);
+    setVerifiedMethod(null);
+
+    // --- FINGERPRINT FLOW ---
+    if (selectedMethod === 'fingerprint') {
+      if (!selectedCredential) {
         setSubmissionError(
-          'Photo capture was cancelled. No attendance was submitted.',
+          'Please enroll fingerprint authentication in Profile before recording attendance.',
         );
         return;
       }
 
-      console.log(
-        '[ATTENDSYNC] SETTING CAPTURED PHOTO:',
-        JSON.stringify(photo),
-      );
+      setVerifying(true);
 
-      setCapturedPhoto(photo);
-      setPreviewLoading(true);
-      setPreviewImageError(false);
-      setCaptureTime(new Date());
-      setVerificationToken(verified.biometric_verification_token);
-      setPendingAttendanceAction(action);
-      setSubmissionError('');
-    } catch (error) {
-      setSubmissionError(
-        error.message || 'Attendance could not be prepared.',
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const retakePhoto = async () => {
-    setSubmitting(true);
-    setSubmissionError('');
-
-    try {
-      const photo = await requestPhoto();
-
-      if (photo) {
-        console.log(
-          '[ATTENDSYNC] SETTING CAPTURED PHOTO:',
-          JSON.stringify(photo),
+      try {
+        const challenge = await apiRequest(
+          '/biometric/challenges',
+          token,
+          {
+            method: 'POST',
+            body: {
+              verification_method: 'fingerprint',
+              credential_id: selectedCredential.credential_id,
+              purpose: currentAction === 'time-out' ? 'attendance-time-out' : 'attendance-time-in',
+            },
+          },
         );
 
-        setCapturedPhoto(photo);
-        setPreviewLoading(true);
-        setPreviewImageError(false);
-        setCaptureTime(new Date());
+        const signature = await biometrics.createSignature({
+          promptMessage: `Confirm fingerprint for ${actionLabel}`,
+          payload: challenge.message_to_sign,
+        });
+
+        if (!signature.success || !signature.signature) {
+          throw new Error(
+            'Fingerprint verification was cancelled. Attendance photo capture was not opened.',
+          );
+        }
+
+        const verified = await apiRequest('/biometric/verify', token, {
+          method: 'POST',
+          body: {
+            challenge_id: challenge.challenge_id,
+            signature: signature.signature,
+          },
+        });
+
+        const tokenString =
+          verified.biometric_verification_token ||
+          verified.verification_token ||
+          null;
+
+        if (!tokenString) {
+          throw new Error(
+            'The server could not verify your biometric signature. Attendance was not recorded.',
+          );
+        }
+
+        // Biometric verification SUCCEEDED
+        setVerificationToken(tokenString);
+        setVerifiedMethod('fingerprint');
+        setPendingAttendanceAction(currentAction);
+        setVerificationSuccessNotice('Fingerprint verified. Please capture your photo proof.');
+
+        // STEP 3: Open in-app camera
+        setIsCameraOpen(true);
+      } catch (error) {
+        setVerificationToken(null);
+        setVerifiedMethod(null);
+        setPendingAttendanceAction(null);
+        setIsCameraOpen(false);
+        setSubmissionError(
+          error.message || 'Fingerprint verification could not be completed.',
+        );
+      } finally {
+        setVerifying(false);
       }
-    } catch (error) {
-      setSubmissionError(
-        error.message || 'The attendance photo could not be retaken.',
-      );
-    } finally {
-      setSubmitting(false);
+      return;
+    }
+
+    // --- FACE VERIFICATION FLOW ---
+    if (selectedMethod === 'face') {
+      if (!faceStatus.enrolled) {
+        navigation.navigate('FaceRecognition', {
+          mode: 'enroll',
+          token,
+          onEnrollmentComplete: () => {
+            loadFaceStatus();
+          },
+        });
+        return;
+      }
+
+      setPendingAttendanceAction(currentAction);
+
+      // Navigate to existing FaceRecognition screen with verify mode
+      navigation.navigate('FaceRecognition', {
+        mode: 'verify',
+        token,
+        onVerified: response => {
+          const faceToken =
+            response?.face_verification_token ||
+            response?.data?.face_verification_token ||
+            null;
+
+          if (!faceToken) {
+            setSubmissionError(
+              'Face verification completed, but no verification token was received from the server.',
+            );
+            return;
+          }
+
+          // Biometric verification SUCCEEDED
+          setVerificationToken(faceToken);
+          setVerifiedMethod('face');
+          setPendingAttendanceAction(currentAction);
+          setVerificationSuccessNotice('Face recognized & verified. Please capture your photo proof.');
+
+          // STEP 3: Open in-app camera
+          setIsCameraOpen(true);
+        },
+        onCancelled: () => {
+          setVerificationToken(null);
+          setVerifiedMethod(null);
+          setPendingAttendanceAction(null);
+          setIsCameraOpen(false);
+          setSubmissionError(
+            'Face verification was cancelled or unverified. Attendance photo capture was not opened.',
+          );
+        },
+      });
     }
   };
 
+  // STEP 3 Callback: In-App Photo Captured
+  const handlePhotoCaptured = photo => {
+    if (!photo?.uri) {
+      setSubmissionError('The in-app camera did not return a valid photo.');
+      return;
+    }
+
+    setIsCameraOpen(false);
+    // STEP 4: Store captured photo for review BEFORE submitting
+    setCapturedPhoto(photo);
+    setPreviewLoading(false);
+    setPreviewImageError(false);
+  };
+
+  // STEP 4 Callback: Retake Photo
+  const handleRetakePhoto = () => {
+    setCapturedPhoto(null);
+    setPreviewLoading(false);
+    setPreviewImageError(false);
+    setSubmissionError('');
+    // Re-open in-app camera directly without duplicate submission
+    setIsCameraOpen(true);
+  };
+
+  // STEP 5: Confirm & Submit Attendance to Laravel
   const submitAttendance = async () => {
-    if (!capturedPhoto || !verificationToken || !pendingAttendanceAction) {
+    if (!verificationToken || !capturedPhoto) {
       setSubmissionError(
-        'Verify your identity and capture a photo before submitting attendance.',
+        'Please complete biometric verification and capture an attendance photo proof first.',
       );
       return;
     }
@@ -387,769 +440,815 @@ export default function AttendanceScreen({token, navigation}) {
     setSubmissionError('');
 
     try {
+      const isTimeOut = pendingAttendanceAction === 'time-out';
       const body = new FormData();
 
-      body.append(
-        'biometric_verification_token',
-        verificationToken,
-      );
+      body.append('verification_method', verifiedMethod || selectedMethod);
+
+      if (verifiedMethod === 'face') {
+        body.append('face_verification_token', verificationToken);
+      } else {
+        body.append('biometric_verification_token', verificationToken);
+      }
 
       body.append('photo', {
         uri: capturedPhoto.uri,
-        name: capturedPhoto.name,
-        type: capturedPhoto.type,
+        name: capturedPhoto.name || `attendance-${Date.now()}.jpg`,
+        type: capturedPhoto.type || 'image/jpeg',
       });
 
-      const isTimeOut = pendingAttendanceAction === 'time-out';
       const submission = await apiRequest(
         isTimeOut ? '/attendance/time-out' : '/attendance/time-in',
         token,
         {
-        method: 'POST',
-        body,
+          method: 'POST',
+          body,
+          timeout: 25000,
         },
       );
 
       const saved = submission.attendance;
 
-      if (!saved?.attendance_date || !saved?.time_in ||
-        (isTimeOut ? !saved?.time_out : !saved?.status)) {
+      if (
+        !saved?.attendance_date ||
+        !saved?.time_in ||
+        (isTimeOut ? !saved?.time_out : !saved?.status)
+      ) {
         throw new Error(
-          `The server did not return the official ${isTimeOut ? 'Time Out' : 'Time In'} record. Refresh attendance to confirm the saved record.`,
+          `The server did not return the official saved ${
+            isTimeOut ? 'Time Out' : 'Time In'
+          } record. Refresh attendance to confirm.`,
         );
       }
 
+      // Success cleanup
       setAttendance(saved);
+      setSubmissionSuccessRecord({
+        action: isTimeOut ? 'Time Out' : 'Time In',
+        officialTimestamp: isTimeOut ? saved.time_out : saved.time_in,
+        status: saved.status,
+        method: verifiedMethod || selectedMethod,
+      });
+
       setCapturedPhoto(null);
-      setCaptureTime(null);
       setVerificationToken(null);
-      setPreviewLoading(false);
-      setPreviewImageError(false);
+      setVerifiedMethod(null);
       setPendingAttendanceAction(null);
+      setVerificationSuccessNotice('');
 
+      // Refresh today's record and credentials
       await loadToday();
-
-      Alert.alert(
-        isTimeOut ? 'Time Out recorded' : 'Time In recorded',
-        `Your official ${isTimeOut ? 'Time Out' : 'Time In'} was returned by the attendance server.`,
-      );
     } catch (error) {
       setSubmissionError(
-        error.message || 'Attendance could not be submitted.',
+        error.message || 'Attendance could not be submitted to the school server.',
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const formattedDate = formatAttendanceDate(
-    attendance?.attendance_date,
-  );
+  const formattedDate = formatAttendanceDate(attendance?.attendance_date);
+  const formattedTimeIn = formatAttendanceTime(attendance?.time_in);
+  const formattedTimeOut = formatAttendanceTime(attendance?.time_out);
+  const hasOfficialTimestamp = Boolean(formattedDate && formattedTimeIn);
 
-  const formattedTime = formatAttendanceTime(attendance?.time_in);
+  // Can verify check for the currently selected method
+  const isMethodReady =
+    selectedMethod === 'fingerprint'
+      ? Boolean(selectedCredential && credentials.length > 0)
+      : true;
 
-  const hasOfficialTimestamp = Boolean(
-    formattedDate && formattedTime,
-  );
-
-  const hasTimeIn = Boolean(attendance?.time_in);
-  const hasTimeOut = Boolean(attendance?.time_out);
-
-  const canSubmit = Boolean(
+  const canTriggerVerification = Boolean(
     token &&
-      selectedCredential &&
+      isMethodReady &&
       !hasTimeOut &&
+      !verifying &&
       !submitting &&
-      !loadingAttendance,
+      !loadingAttendance &&
+      !loadingEnrollment &&
+      !loadingFaceStatus,
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.container}>
       <StatusBar
+        translucent
+        backgroundColor="transparent"
         barStyle="light-content"
-        backgroundColor={COLORS.navyDeep}
       />
 
       <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>
-            BANSUD CENTRAL SCHOOL
-          </Text>
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.content,
+          {paddingBottom: Math.max(insets.bottom, 16) + 32},
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={loadingAttendance || loadingEnrollment || loadingFaceStatus}
+            onRefresh={refreshAll}
+            progressViewOffset={80}
+            tintColor={COLORS.white}
+            colors={[COLORS.blue]}
+          />
+        }
+      >
+        {/* Full-width Reusable Header */}
+        <AppHeader
+          variant="standard"
+          title="Daily Attendance"
+          schoolName="BANSUD CENTRAL SCHOOL"
+          subtitle="Official DepEd biometric time recording & proof capture."
+          rightAction={
+            <TouchableOpacity
+              style={styles.historyHeaderBtn}
+              onPress={() => navigation.navigate('AttendanceHistory')}
+              accessibilityRole="button"
+              accessibilityLabel="View attendance history"
+              activeOpacity={0.7}
+            >
+              <History size={17} color={COLORS.white} strokeWidth={2.4} />
+            </TouchableOpacity>
+          }
+        />
 
-          <Text style={styles.title}>Attendance</Text>
+        <View style={styles.body}>
+          {/* Today's Official Record Hero Card */}
+          <View style={styles.recordCard}>
+            <View style={styles.recordHeader}>
+              <View>
+                <Text style={styles.cardEyebrow}>OFFICIAL SERVER RECORD</Text>
+                <Text style={styles.cardTitle}>Today's attendance</Text>
+              </View>
 
-          <Text style={styles.subtitle}>
-            Securely record your arrival using your enrolled device
-            biometric.
-          </Text>
-        </View>
-
-        <View style={styles.recordCard}>
-          <View style={styles.recordHeader}>
-            <View>
-              <Text style={styles.cardEyebrow}>
-                OFFICIAL SERVER RECORD
-              </Text>
-
-              <Text style={styles.cardTitle}>
-                Today's attendance
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.statusBadge,
-                hasTimeIn
-                  ? styles.successBadge
-                  : styles.pendingBadge,
-              ]}>
-              <View
-                style={[
-                  styles.statusDot,
-                  hasTimeIn
-                    ? styles.successDot
-                    : styles.pendingDot,
-                ]}
+              <StatusBadge
+                status={
+                  loadingAttendance
+                    ? 'loading'
+                    : hasTimeIn
+                    ? attendance?.status || 'recorded'
+                    : 'not_recorded'
+                }
+                label={
+                  loadingAttendance
+                    ? 'Checking...'
+                    : hasTimeIn
+                    ? attendance?.status === 'late'
+                      ? 'Late'
+                      : 'Recorded'
+                    : 'Not recorded'
+                }
               />
-
-              <Text
-                style={[
-                  styles.statusText,
-                  hasTimeIn
-                    ? styles.successText
-                    : styles.pendingText,
-                ]}>
-                {loadingAttendance
-                  ? 'Loading'
-                  : hasTimeIn
-                  ? attendance.status === 'late'
-                    ? 'Late'
-                    : 'Recorded'
-                  : 'Not recorded'}
-              </Text>
             </View>
-          </View>
 
-          {loadingAttendance ? (
-            <ActivityIndicator
-              style={styles.loader}
-              color={COLORS.blue}
-              size="large"
-            />
-          ) : hasTimeIn ? (
-            <View style={styles.attendanceTimes}>
-              {hasOfficialTimestamp ? (
+            {loadingAttendance ? (
+              <ActivityIndicator
+                style={styles.loader}
+                color={COLORS.blue}
+                size="large"
+              />
+            ) : hasTimeIn ? (
+              <View style={styles.attendanceTimes}>
+                {hasOfficialTimestamp ? (
+                  <View style={styles.attendanceTimeRow}>
+                    <Clock3 size={18} color={COLORS.green} strokeWidth={2.2} />
+                    <View style={styles.attendanceTimeCopy}>
+                      <Text style={styles.attendanceTimeLabel}>Time In</Text>
+                      <Text style={styles.attendanceTimeValue}>{formattedTimeIn}</Text>
+                      {attendance?.time_in ? (
+                        <Text style={styles.attendanceTimeExact}>
+                          {formatAttendanceDateTime(attendance.time_in)}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.attendanceTimeMethod}>
+                        Verified by {attendance.time_in_verification_method || 'biometrics'}
+                      </Text>
+                    </View>
+                    <View style={styles.recordedTag}>
+                      <Text style={styles.recordedTagText}>RECORDED</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Banner
+                    type="warning"
+                    message="The saved server Time In is unavailable. Refresh to retrieve the official record."
+                  />
+                )}
+
                 <View style={styles.attendanceTimeRow}>
                   <Clock3
                     size={18}
-                    color={COLORS.green}
-                    strokeWidth={2}
+                    color={hasTimeOut ? COLORS.green : COLORS.muted}
+                    strokeWidth={2.2}
                   />
-
                   <View style={styles.attendanceTimeCopy}>
-                    <Text style={styles.attendanceTimeLabel}>
-                      Time In
-                    </Text>
-
+                    <Text style={styles.attendanceTimeLabel}>Time Out</Text>
                     <Text style={styles.attendanceTimeValue}>
-                      {formattedTime}
+                      {formattedTimeOut || 'Not recorded'}
                     </Text>
+                    {hasTimeOut && attendance?.time_out ? (
+                      <Text style={styles.attendanceTimeExact}>
+                        {formatAttendanceDateTime(attendance.time_out)}
+                      </Text>
+                    ) : null}
+                    {hasTimeOut ? (
+                      <Text style={styles.attendanceTimeMethod}>
+                        Verified by {attendance.time_out_verification_method || 'biometrics'}
+                      </Text>
+                    ) : null}
                   </View>
-
-                  <Text style={styles.officialTag}>
-                    RECORDED
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.errorBanner}>
-                  <Text style={styles.errorText}>
-                    The saved server Time In is unavailable.
-                    Refresh to retrieve the official record.
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.attendanceTimeRow}>
-                <Clock3
-                  size={18}
-                  color={
-                    attendance.time_out
-                      ? COLORS.green
-                      : COLORS.muted
-                  }
-                  strokeWidth={2}
-                />
-
-                <View style={styles.attendanceTimeCopy}>
-                  <Text style={styles.attendanceTimeLabel}>
-                    Time Out
-                  </Text>
-
-                  <Text style={styles.attendanceTimeValue}>
-                    {formatAttendanceTime(attendance.time_out) ||
-                      'Not recorded'}
-                  </Text>
+                  {hasTimeOut ? (
+                    <View style={styles.recordedTag}>
+                      <Text style={styles.recordedTagText}>RECORDED</Text>
+                    </View>
+                  ) : null}
                 </View>
 
-                {attendance.time_out ? (
-                  <Text style={styles.officialTag}>
-                    RECORDED
-                  </Text>
-                ) : null}
+                <Text style={styles.recordDate}>{formattedDate}</Text>
+                <Text style={styles.timezoneNote}>Official times · Asia/Manila</Text>
               </View>
+            ) : (
+              <View style={styles.emptyPanel}>
+                <View style={styles.emptyIconCircle}>
+                  <Clock3 size={32} color={COLORS.blue} strokeWidth={2} />
+                </View>
+                <Text style={styles.emptyTitle}>Ready for {actionLabel}</Text>
+                <Text style={styles.emptyDescription}>
+                  Select your biometric verification method, take an in-app photo proof, and confirm before recording.
+                </Text>
+              </View>
+            )}
 
-              <Text style={styles.recordDate}>
-                {formattedDate}
-              </Text>
+            {attendance?.status && (
+              <View style={styles.savedStatus}>
+                <Text style={styles.savedStatusLabel}>Attendance status</Text>
+                <Text
+                  style={[
+                    styles.savedStatusValue,
+                    attendance.status === 'late' && styles.lateValue,
+                  ]}
+                >
+                  {attendance.status === 'late'
+                    ? 'Late'
+                    : attendance.status === 'present'
+                    ? 'On Time'
+                    : attendance.status.replace(/_/g, ' ')}
+                </Text>
+              </View>
+            )}
 
-              <Text style={styles.timezoneNote}>
-                Official times · Asia/Manila
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.emptyPanel}>
-              <Clock3
-                size={34}
-                color={COLORS.blue}
-                strokeWidth={1.8}
-              />
-
-              <Text style={styles.emptyTitle}>
-                Ready when you are
-              </Text>
-
-              <Text style={styles.emptyDescription}>
-                Verify your identity, take a photo, then review it
-                before submitting Time In.
-              </Text>
-            </View>
-          )}
-
-          {attendance?.status && (
-            <View style={styles.savedStatus}>
-              <Text style={styles.savedStatusLabel}>
-                Attendance status
-              </Text>
-
-              <Text
-                style={[
-                  styles.savedStatusValue,
-                  attendance.status === 'late' &&
-                    styles.lateValue,
-                ]}>
-                {attendance.status === 'late'
-                  ? 'Late'
-                  : attendance.status === 'present'
-                  ? 'On Time'
-                  : attendance.status.replace(/_/g, ' ')}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {refreshError ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>
-              {refreshError}
-            </Text>
-
+            {/* Link to Dedicated Attendance History Screen */}
             <TouchableOpacity
-              onPress={loadToday}
-              accessibilityRole="button">
-              <Text style={styles.inlineAction}>Retry</Text>
+              style={styles.historyLinkRow}
+              onPress={() => navigation.navigate('AttendanceHistory')}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+            >
+              <View style={styles.historyLinkLeft}>
+                <History size={16} color={COLORS.blue} strokeWidth={2.2} />
+                <Text style={styles.historyLinkText}>View Attendance History & Logs</Text>
+              </View>
+              <ChevronRight size={16} color={COLORS.blue} strokeWidth={2.2} />
             </TouchableOpacity>
           </View>
-        ) : null}
 
-        {submissionError ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>
-              {submissionError}
-            </Text>
-          </View>
-        ) : null}
+          {/* Submission Success Alert Card */}
+          {submissionSuccessRecord ? (
+            <View style={styles.successCard}>
+              <View style={styles.successIconCircle}>
+                <CheckCircle size={32} color={COLORS.green} strokeWidth={2.4} />
+              </View>
+              <Text style={styles.successTitle}>
+                {submissionSuccessRecord.action} Successfully Recorded!
+              </Text>
+              <Text style={styles.successDescription}>
+                Official server timestamp authenticated and saved to your school record.
+              </Text>
 
-        {(!hasTimeIn || !hasTimeOut) && (
-          <View style={styles.actionCard}>
-            {capturedPhoto ? (
-              <>
-                <Text style={styles.sectionTitle}>
-                  Review attendance proof
-                </Text>
-
-                <Text style={styles.infoText}>
-                  Check your photo and capture timestamp before
-                  submitting {pendingAttendanceAction === 'time-out' ? 'Time Out' : 'Time In'}.
-                </Text>
-
-                <ImageBackground
-                  key={capturedPhoto.uri}
-                  source={{uri: capturedPhoto.uri}}
-                  style={styles.photoPreview}
-                  imageStyle={styles.previewImage}
-                  resizeMode="contain"
-                  onLoadStart={() => {
-                    console.log(
-                      '[ATTENDSYNC] PHOTO PREVIEW LOAD START',
-                    );
-
-                    setPreviewLoading(true);
-                    setPreviewImageError(false);
-                  }}
-                  onLoad={() => {
-                    console.log(
-                      '[ATTENDSYNC] PHOTO PREVIEW LOADED',
-                    );
-
-                    setPreviewLoading(false);
-                    setPreviewImageError(false);
-                  }}
-                  onError={event => {
-                    console.warn(
-                      '[ATTENDSYNC] PHOTO PREVIEW ERROR:',
-                      event.nativeEvent,
-                    );
-
-                    setPreviewLoading(false);
-                    setPreviewImageError(true);
-                  }}>
-                  {previewLoading && !previewImageError ? (
-                    <View style={styles.photoLoadStatus}>
-                      <ActivityIndicator
-                        color={COLORS.white}
-                      />
-
-                      <Text style={styles.photoLoadStatusText}>
-                        Loading photo preview...
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {previewImageError ? (
-                    <View style={styles.photoLoadError}>
-                      <Text
-                        style={styles.photoLoadErrorText}>
-                        Could not display the camera photo. Please
-                        retake it before submitting.
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  <View style={styles.photoTimestamp}>
-                    <Text style={styles.photoTimestampDate}>
-                      {formatCaptureTimestamp(captureTime)}
-                    </Text>
-
-                    <Text style={styles.photoTimestampNote}>
-                      {pendingAttendanceAction === 'time-out' ? 'TIME OUT' : 'TIME IN'} PHOTO CAPTURE TIME · ASIA/MANILA
-                    </Text>
-                  </View>
-                </ImageBackground>
-
-                {__DEV__ ? (
-                  <Text style={styles.photoUriDiagnostic}>
-                    Photo URI:{' '}
-                    {capturedPhoto.uri || 'NONE'}
+              <View style={styles.successDetailsBox}>
+                <View style={styles.successDetailRow}>
+                  <Text style={styles.successDetailLabel}>Official Timestamp</Text>
+                  <Text style={styles.successDetailValue}>
+                    {formatAttendanceDateTime(submissionSuccessRecord.officialTimestamp) || 'Recorded'}
                   </Text>
-                ) : null}
-
-                <Text style={styles.previewDisclaimer}>
-                  This is the device photo-capture time for review.
-                  The official attendance time is assigned by the
-                  server after submission.
-                </Text>
-
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryButton,
-                    submitting && styles.buttonDisabled,
-                  ]}
-                  onPress={retakePhoto}
-                  disabled={submitting}
-                  accessibilityRole="button">
-                  {submitting ? (
-                    <ActivityIndicator
-                      color={COLORS.navy}
-                    />
-                  ) : (
-                    <>
-                      <RefreshCw
-                        size={17}
-                        color={COLORS.navy}
-                        strokeWidth={2.2}
-                      />
-
-                      <Text
-                        style={styles.secondaryButtonText}>
-                        Retake photo
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    (submitting || previewImageError) &&
-                      styles.buttonDisabled,
-                  ]}
-                  onPress={submitAttendance}
-                  disabled={
-                    submitting || previewImageError
-                  }
-                  accessibilityRole="button">
-                  {submitting ? (
-                    <ActivityIndicator
-                      color={COLORS.white}
-                    />
-                  ) : (
-                    <>
-                      <CheckCircle
-                        size={18}
-                        color={COLORS.white}
-                        strokeWidth={2.2}
-                      />
-
-                      <Text style={styles.primaryButtonText}>
-                        Submit {pendingAttendanceAction === 'time-out' ? 'Time Out' : 'Time In'}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.sectionTitle}>
-                  Verification method
-                </Text>
-
-                {loadingEnrollment ? (
-                  <ActivityIndicator color={COLORS.blue} />
-                ) : enrollmentStatusError ? (
-                  <View style={styles.infoBanner}>
-                    <Text style={styles.infoText}>
-                      Enrollment status could not be confirmed:{' '}
-                      {enrollmentStatusError}
-                    </Text>
-
-                    <TouchableOpacity
-                      onPress={loadBiometricCredentials}
-                      accessibilityRole="button">
-                      <Text style={styles.inlineAction}>
-                        Retry status check
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : credentials.length ? (
-                  <View>
-                    {credentials.map(credential => (
-                      <TouchableOpacity
-                        key={credential.credential_id}
-                        style={[
-                          styles.methodRow,
-                          selectedCredential?.credential_id ===
-                            credential.credential_id &&
-                            styles.methodSelected,
-                        ]}
-                        onPress={() =>
-                          setSelectedCredential(credential)
-                        }
-                        accessibilityRole="radio"
-                        accessibilityState={{
-                          selected:
-                            selectedCredential?.credential_id ===
-                            credential.credential_id,
-                        }}>
-                        <View style={styles.methodIcon}>
-                          <Text style={styles.methodIconText}>
-                            ✓
-                          </Text>
-                        </View>
-
-                        <View style={styles.methodCopy}>
-                          <Text style={styles.methodTitle}>
-                            Fingerprint
-                          </Text>
-
-                          <Text style={styles.methodSubtitle}>
-                            {credential.device_name} · enrolled
-                            with server
-                          </Text>
-                        </View>
-
-                        <View style={styles.radioOuter}>
-                          {selectedCredential?.credential_id ===
-                            credential.credential_id && (
-                            <View style={styles.radioInner} />
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : (
-                  <View style={styles.infoBanner}>
-                    <Text style={styles.infoText}>
-                      Fingerprint is not enrolled on this account.
-                      You can set it up in Profile; email and
-                      password login remains available.
-                    </Text>
-
-                    <TouchableOpacity
-                      onPress={() =>
-                        navigation.navigate('Profile')
-                      }
-                      accessibilityRole="button">
-                      <Text style={styles.inlineAction}>
-                        Set up fingerprint
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                <View
-                  style={[
-                    styles.methodRow,
-                    styles.disabledMethod,
-                  ]}>
-                  <View style={styles.faceIcon}>
-                    <Text style={styles.methodIconText}>
-                      ◎
-                    </Text>
-                  </View>
-
-                  <View style={styles.methodCopy}>
-                    <Text style={styles.methodTitle}>
-                      Face recognition
-                    </Text>
-
-                    <Text style={styles.methodSubtitle}>
-                      Unavailable until a secure face/liveness
-                      verifier is integrated
-                    </Text>
-                  </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    !canSubmit && styles.buttonDisabled,
-                  ]}
-                  onPress={() =>
-                    verifyAndPrepareAttendance(hasTimeIn ? 'time-out' : 'time-in')
-                  }
-                  disabled={!canSubmit}
-                  accessibilityRole="button">
-                  {submitting ? (
-                    <ActivityIndicator
-                      color={COLORS.white}
-                    />
-                  ) : (
-                    <>
-                      <Camera
-                        size={18}
-                        color={COLORS.white}
+                <View style={styles.successDetailRow}>
+                  <Text style={styles.successDetailLabel}>Attendance Status</Text>
+                  <Text
+                    style={[
+                      styles.successDetailValue,
+                      submissionSuccessRecord.status === 'late'
+                        ? styles.lateValue
+                        : styles.onTimeValue,
+                    ]}
+                  >
+                    {submissionSuccessRecord.status === 'late' ? 'Late' : 'On Time'}
+                  </Text>
+                </View>
+
+                <View style={styles.successDetailRow}>
+                  <Text style={styles.successDetailLabel}>Verified Biometric</Text>
+                  <Text style={styles.successDetailValue}>
+                    {submissionSuccessRecord.method === 'face'
+                      ? 'Face Verification'
+                      : 'Fingerprint Authentication'}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.dismissSuccessBtn}
+                onPress={() => setSubmissionSuccessRecord(null)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.dismissSuccessBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {refreshError ? (
+            <Banner
+              type="error"
+              message={refreshError}
+              actionText="Retry"
+              onAction={loadToday}
+            />
+          ) : null}
+
+          {submissionError ? (
+            <Banner
+              type="error"
+              message={submissionError}
+            />
+          ) : null}
+
+          {verificationSuccessNotice ? (
+            <Banner
+              type="success"
+              message={verificationSuccessNotice}
+            />
+          ) : null}
+
+          {/* Daily Attendance Completed Confirmation Card */}
+          {hasTimeOut && (
+            <View style={styles.completedCard}>
+              <View style={styles.completedIconBox}>
+                <CheckCircle2 size={24} color={COLORS.green} strokeWidth={2.4} />
+              </View>
+              <View style={styles.completedCopy}>
+                <Text style={styles.completedTitle}>Attendance Complete for Today</Text>
+                <Text style={styles.completedSubtitle}>
+                  Both Time In and Time Out have been successfully recorded with verified biometrics and photo proofs.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* ATTENDANCE TRANSACTION WORKFLOW CARD */}
+          {!hasTimeOut && (
+            <View style={styles.actionCard}>
+              {/* STEP 4: PHOTO PREVIEW & CONFIRMATION */}
+              {capturedPhoto ? (
+                <>
+                  <View style={styles.flowHeader}>
+                    <Text style={styles.flowStepBadge}>STEP 4 OF 4</Text>
+                    <Text style={styles.sectionTitle}>Review Attendance Proof</Text>
+                  </View>
+
+                  <Text style={styles.infoText}>
+                    Verify your in-app camera snapshot before submitting{' '}
+                    <Text style={{fontWeight: '800', color: COLORS.navy}}>
+                      {pendingAttendanceAction === 'time-out' ? 'Time Out' : 'Time In'}
+                    </Text>
+                    . Official timestamp will be generated by the school server upon confirmation.
+                  </Text>
+
+                  <ImageBackground
+                    key={capturedPhoto.uri}
+                    source={{uri: capturedPhoto.uri}}
+                    style={styles.photoPreview}
+                    imageStyle={styles.previewImage}
+                    resizeMode="cover"
+                    onLoadStart={() => {
+                      setPreviewLoading(true);
+                      setPreviewImageError(false);
+                    }}
+                    onLoad={() => {
+                      setPreviewLoading(false);
+                      setPreviewImageError(false);
+                    }}
+                    onError={() => {
+                      setPreviewLoading(false);
+                      setPreviewImageError(true);
+                    }}
+                  >
+                    {previewLoading && !previewImageError ? (
+                      <View style={styles.photoLoadStatus}>
+                        <ActivityIndicator color={COLORS.white} />
+                        <Text style={styles.photoLoadStatusText}>
+                          Loading photo preview...
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {previewImageError ? (
+                      <View style={styles.photoLoadError}>
+                        <Text style={styles.photoLoadErrorText}>
+                          Could not display the photo preview. Please retake it before submitting.
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <View style={styles.photoTimestamp}>
+                      <Text style={styles.photoTimestampDate}>
+                        {pendingAttendanceAction === 'time-out' ? 'TIME OUT PROOF' : 'TIME IN PROOF'}
+                      </Text>
+                      <Text style={styles.photoTimestampNote}>
+                        VERIFIED BY{' '}
+                        {verifiedMethod === 'face'
+                          ? 'FACE RECOGNITION'
+                          : 'FINGERPRINT KEYSTORE'}
+                        {' · '}AUTHORITATIVE SERVER TIMESTAMP WILL APPLY
+                      </Text>
+                    </View>
+                  </ImageBackground>
+
+                  <View style={styles.photoButtonGroup}>
+                    <TouchableOpacity
+                      style={[
+                        styles.secondaryButton,
+                        submitting && styles.buttonDisabled,
+                      ]}
+                      onPress={handleRetakePhoto}
+                      disabled={submitting}
+                      accessibilityRole="button"
+                    >
+                      <RefreshCw size={16} color={COLORS.navy} strokeWidth={2.4} />
+                      <Text style={styles.secondaryButtonText}>Retake Photo</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.primaryButton,
+                        styles.primarySubmitBtn,
+                        (submitting || previewImageError) && styles.buttonDisabled,
+                      ]}
+                      onPress={submitAttendance}
+                      disabled={submitting || previewImageError}
+                      accessibilityRole="button"
+                    >
+                      {submitting ? (
+                        <>
+                          <ActivityIndicator color={COLORS.white} size="small" />
+                          <Text style={styles.primaryButtonText}>Submitting to Server…</Text>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle size={18} color={COLORS.white} strokeWidth={2.4} />
+                          <Text style={styles.primaryButtonText}>
+                            Use Photo / Confirm {actionLabel}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                /* STEP 1: SELECT BIOMETRIC METHOD */
+                <>
+                  <View style={styles.flowHeader}>
+                    <Text style={styles.flowStepBadge}>STEP 1 & 2</Text>
+                    <Text style={styles.sectionTitle}>
+                      Choose Biometric Verification
+                    </Text>
+                  </View>
+
+                  <Text style={styles.infoText}>
+                    Select your preferred biometric method for{' '}
+                    <Text style={{fontWeight: '800', color: COLORS.navy}}>{actionLabel}</Text>.
+                    Verification is required before camera photo proof opens.
+                  </Text>
+
+                  {/* METHOD 1: FINGERPRINT OPTION */}
+                  <TouchableOpacity
+                    style={[
+                      styles.methodCard,
+                      selectedMethod === 'fingerprint' && styles.methodCardSelected,
+                    ]}
+                    onPress={() => handleSelectMethod('fingerprint')}
+                    accessibilityRole="radio"
+                    accessibilityState={{selected: selectedMethod === 'fingerprint'}}
+                    activeOpacity={0.85}
+                  >
+                    <View
+                      style={[
+                        styles.methodIconBox,
+                        selectedMethod === 'fingerprint' && styles.methodIconBoxSelected,
+                      ]}
+                    >
+                      <Fingerprint
+                        size={22}
+                        color={selectedMethod === 'fingerprint' ? COLORS.blue : COLORS.navy}
                         strokeWidth={2.2}
                       />
+                    </View>
 
-                      <Text style={styles.primaryButtonText}>
-                        Verify &amp; take {hasTimeIn ? 'Time Out' : 'Time In'} proof photo
+                    <View style={styles.methodCopy}>
+                      <View style={styles.methodTitleRow}>
+                        <Text style={styles.methodTitle}>Fingerprint Authentication</Text>
+                        {credentials.length > 0 ? (
+                          <View style={styles.enrolledBadge}>
+                            <Text style={styles.enrolledBadgeText}>ENROLLED</Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <Text style={styles.methodSubtitle}>
+                        {loadingEnrollment
+                          ? 'Checking fingerprint enrollment…'
+                          : credentials.length > 0
+                          ? `${selectedCredential?.device_name || 'Device key registered'} · Hardware keystore verified`
+                          : 'Not enrolled on this device. Set up fingerprint in Profile.'}
                       </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
 
-                <Text style={styles.privacyNote}>
-                  Your phone signs a one-time server challenge.
-                  Fingerprint images never leave your device.
-                </Text>
-              </>
-            )}
+                      {!loadingEnrollment && credentials.length === 0 ? (
+                        <TouchableOpacity
+                          style={styles.setupInlineBtn}
+                          onPress={() => navigation.navigate('Profile')}
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.setupInlineBtnText}>Set Up Fingerprint in Profile →</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+
+                    <View
+                      style={[
+                        styles.radioCircle,
+                        selectedMethod === 'fingerprint' && styles.radioCircleSelected,
+                      ]}
+                    >
+                      {selectedMethod === 'fingerprint' ? (
+                        <View style={styles.radioDot} />
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* METHOD 2: FACE VERIFICATION OPTION */}
+                  <TouchableOpacity
+                    style={[
+                      styles.methodCard,
+                      selectedMethod === 'face' && styles.methodCardSelected,
+                    ]}
+                    onPress={() => handleSelectMethod('face')}
+                    accessibilityRole="radio"
+                    accessibilityState={{selected: selectedMethod === 'face'}}
+                    activeOpacity={0.85}
+                  >
+                    <View
+                      style={[
+                        styles.methodIconBox,
+                        selectedMethod === 'face' && styles.methodIconBoxSelected,
+                      ]}
+                    >
+                      <ScanFace
+                        size={22}
+                        color={selectedMethod === 'face' ? COLORS.blue : COLORS.navy}
+                        strokeWidth={2.2}
+                      />
+                    </View>
+
+                    <View style={styles.methodCopy}>
+                      <View style={styles.methodTitleRow}>
+                        <Text style={styles.methodTitle}>Face Verification</Text>
+                        {faceStatus.enrolled ? (
+                          <View style={styles.enrolledBadge}>
+                            <Text style={styles.enrolledBadgeText}>ENROLLED</Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <Text style={styles.methodSubtitle}>
+                        {loadingFaceStatus
+                          ? 'Checking server face model…'
+                          : faceStatus.enrolled
+                          ? 'Server face model active · Real-time blink liveness detection'
+                          : "You haven't registered your face yet. Register your face first to use Face Recognition for attendance verification."}
+                      </Text>
+
+                      {!loadingFaceStatus && !faceStatus.enrolled ? (
+                        <TouchableOpacity
+                          style={styles.setupInlineBtn}
+                          onPress={() =>
+                            navigation.navigate('FaceRecognition', {
+                              mode: 'enroll',
+                              token,
+                              onEnrollmentComplete: () => loadFaceStatus(),
+                            })
+                          }
+                          accessibilityRole="button"
+                        >
+                          <Text style={styles.setupInlineBtnText}>Register My Face →</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+
+                    <View
+                      style={[
+                        styles.radioCircle,
+                        selectedMethod === 'face' && styles.radioCircleSelected,
+                      ]}
+                    >
+                      {selectedMethod === 'face' ? (
+                        <View style={styles.radioDot} />
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* STEP 2 TRIGGER BUTTON */}
+                  <TouchableOpacity
+                    style={[
+                      styles.primaryButton,
+                      !canTriggerVerification && !verificationToken && styles.buttonDisabled,
+                    ]}
+                    onPress={handleTriggerAction}
+                    disabled={!canTriggerVerification && !verificationToken}
+                    accessibilityRole="button"
+                    activeOpacity={0.85}
+                  >
+                    {verifying ? (
+                      <>
+                        <ActivityIndicator color={COLORS.white} size="small" />
+                        <Text style={styles.primaryButtonText}>
+                          {selectedMethod === 'fingerprint'
+                            ? 'Verifying Fingerprint Hardware…'
+                            : 'Preparing Face Verification…'}
+                        </Text>
+                      </>
+                    ) : verificationToken ? (
+                      <>
+                        <Camera size={19} color={COLORS.white} strokeWidth={2.4} />
+                        <Text style={styles.primaryButtonText}>
+                          Open Camera ({verifiedMethod === 'face' ? 'Face Verified' : 'Fingerprint Verified'})
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        {selectedMethod === 'fingerprint' ? (
+                          <Fingerprint size={19} color={COLORS.white} strokeWidth={2.4} />
+                        ) : (
+                          <ScanFace size={19} color={COLORS.white} strokeWidth={2.4} />
+                        )}
+                        <Text style={styles.primaryButtonText}>
+                          {selectedMethod === 'fingerprint'
+                            ? `Verify Fingerprint & Open Camera`
+                            : !faceStatus.enrolled
+                            ? `Register My Face`
+                            : `Verify Face & Open Camera`}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <Text style={styles.privacyNote}>
+                    {selectedMethod === 'fingerprint'
+                      ? 'Device signs a one-time cryptographic challenge. Biometric data never leaves the hardware.'
+                      : 'Live face liveness and facial geometry are authenticated strictly against the central server.'}
+                  </Text>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Institutional Integrity Note */}
+          <View style={styles.infoCard}>
+            <View style={styles.infoIconBox}>
+              <ShieldCheck size={20} color={COLORS.blue} strokeWidth={2.2} />
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={styles.infoTitle}>DepEd Biometric Integrity</Text>
+              <Text style={styles.infoDescription}>
+                Official arrival and departure timestamps are authenticated strictly against the central school server. Tamper detection is enforced.
+              </Text>
+            </View>
           </View>
-        )}
-
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>
-            Server-verified attendance
-          </Text>
-
-          <Text style={styles.infoDescription}>
-            Official date and attendance times come only from the
-            saved Laravel attendance record. The photo preview
-            timestamp is informational and does not set your
-            attendance time.
-          </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+
+      {/* STEP 3: EMBEDDED IN-APP CAMERA MODAL */}
+      <AttendanceCameraModal
+        visible={isCameraOpen}
+        title={`${actionLabel} Photo Proof`}
+        subtitle="In-app DepEd attendance verification"
+        onCapture={handlePhotoCaptured}
+        onClose={() => {
+          setIsCameraOpen(false);
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
     backgroundColor: COLORS.canvas,
   },
-
+  scrollView: {
+    flex: 1,
+  },
   content: {
-    padding: 20,
-    paddingBottom: 32,
+    flexGrow: 1,
   },
-
-  header: {
-    backgroundColor: COLORS.navy,
-    marginHorizontal: -20,
+  body: {
+    paddingHorizontal: 20,
     marginTop: -20,
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 30,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
   },
-
-  eyebrow: {
-    color: '#9FB3C8',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-    marginBottom: 10,
-  },
-
-  title: {
-    color: COLORS.white,
-    fontSize: 29,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-
-  subtitle: {
-    color: '#D9E2EC',
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-    maxWidth: 320,
-  },
-
   recordCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 20,
-    marginTop: -14,
+    borderRadius: 22,
     padding: 20,
-    elevation: 3,
-    shadowColor: COLORS.navy,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
+    elevation: 4,
+    shadowColor: COLORS.navyDark,
+    shadowOffset: {width: 0, height: 4},
     shadowOpacity: 0.08,
-    shadowRadius: 10,
+    shadowRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
   },
-
   recordHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-
   cardEyebrow: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 1.1,
     color: COLORS.muted,
-    marginBottom: 5,
+    marginBottom: 4,
   },
-
   cardTitle: {
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.text,
   },
-
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 20,
-  },
-
-  successBadge: {
-    backgroundColor: COLORS.greenLight,
-  },
-
-  pendingBadge: {
-    backgroundColor: COLORS.amberLight,
-  },
-
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginRight: 7,
-  },
-
-  successDot: {
-    backgroundColor: COLORS.green,
-  },
-
-  pendingDot: {
-    backgroundColor: COLORS.amber,
-  },
-
-  statusText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-
-  successText: {
-    color: COLORS.green,
-  },
-
-  pendingText: {
-    color: COLORS.amber,
-  },
-
   loader: {
-    marginVertical: 36,
+    marginVertical: 32,
   },
-
   attendanceTimes: {
-    paddingTop: 16,
+    paddingTop: 14,
   },
-
   attendanceTimeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 58,
+    minHeight: 56,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    paddingVertical: 4,
   },
-
   attendanceTimeCopy: {
     flex: 1,
     marginLeft: 12,
   },
-
   attendanceTimeLabel: {
     fontSize: 11,
     color: COLORS.muted,
     fontWeight: '700',
   },
-
   attendanceTimeValue: {
     fontSize: 16,
     color: COLORS.text,
     fontWeight: '800',
-    marginTop: 3,
+    marginTop: 2,
   },
-
-  officialTag: {
+  attendanceTimeExact: {
+    fontSize: 12,
+    color: COLORS.navy,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  attendanceTimeMethod: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  recordedTag: {
+    backgroundColor: COLORS.greenLight,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  recordedTagText: {
     fontSize: 9,
     fontWeight: '800',
     color: COLORS.green,
+    letterSpacing: 0.5,
   },
-
   recordDate: {
     fontSize: 13,
     color: COLORS.text,
@@ -1157,353 +1256,468 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: 'center',
   },
-
   timezoneNote: {
     fontSize: 10,
     color: COLORS.muted,
-    marginTop: 5,
+    marginTop: 4,
     textAlign: 'center',
   },
-
   emptyPanel: {
     alignItems: 'center',
-    paddingVertical: 26,
+    paddingVertical: 24,
   },
-
+  emptyIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: COLORS.blueLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
   emptyTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: COLORS.text,
-    marginTop: 9,
   },
-
   emptyDescription: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.muted,
     textAlign: 'center',
-    lineHeight: 19,
-    marginTop: 7,
-    maxWidth: 280,
+    lineHeight: 18,
+    marginTop: 6,
+    maxWidth: 290,
   },
-
   savedStatus: {
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    paddingTop: 14,
+    paddingTop: 12,
+    marginTop: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
-
   savedStatusLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.muted,
+    fontWeight: '600',
   },
-
   savedStatusValue: {
     fontSize: 13,
     fontWeight: '800',
     color: COLORS.green,
     textTransform: 'capitalize',
   },
-
   lateValue: {
     color: COLORS.amber,
   },
-
+  onTimeValue: {
+    color: COLORS.green,
+  },
   actionCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 18,
-    marginTop: 16,
+    marginTop: 14,
     elevation: 2,
-    shadowColor: COLORS.navy,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowColor: COLORS.navyDark,
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.05,
     shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
   },
-
+  flowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  flowStepBadge: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: COLORS.blue,
+    backgroundColor: COLORS.blueLight,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+    letterSpacing: 0.5,
+  },
   sectionTitle: {
     color: COLORS.navy,
     fontSize: 16,
     fontWeight: '800',
-    marginBottom: 12,
   },
-
-  methodRow: {
+  infoText: {
+    fontSize: 12,
+    color: COLORS.muted,
+    lineHeight: 17,
+    marginBottom: 14,
+  },
+  methodCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: COLORS.border,
-    borderRadius: 13,
-    padding: 12,
-    marginBottom: 9,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    backgroundColor: '#FAFCFE',
   },
-
-  methodSelected: {
+  methodCardSelected: {
     borderColor: COLORS.blue,
     backgroundColor: '#F5FAFE',
   },
-
-  disabledMethod: {
-    backgroundColor: '#F8FAFC',
-    opacity: 0.8,
-  },
-
-  methodIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: COLORS.greenLight,
+  methodIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-
-  faceIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: '#EEF2F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  methodIconBoxSelected: {
+    backgroundColor: COLORS.blueLight,
   },
-
-  methodIconText: {
-    color: COLORS.green,
-    fontWeight: '900',
-    fontSize: 17,
-  },
-
   methodCopy: {
     flex: 1,
     paddingRight: 8,
   },
-
+  methodTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
   methodTitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: COLORS.text,
     fontWeight: '800',
   },
-
+  enrolledBadge: {
+    backgroundColor: COLORS.greenLight,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  enrolledBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: COLORS.green,
+    letterSpacing: 0.4,
+  },
   methodSubtitle: {
     fontSize: 11,
     color: COLORS.muted,
-    marginTop: 3,
     lineHeight: 15,
+    marginTop: 2,
   },
-
-  radioOuter: {
-    width: 19,
-    height: 19,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: COLORS.blue,
-    alignItems: 'center',
-    justifyContent: 'center',
+  setupInlineBtn: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
   },
-
-  radioInner: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: COLORS.blue,
-  },
-
-  infoBanner: {
-    backgroundColor: COLORS.blueLight,
-    borderRadius: 12,
-    padding: 13,
-    marginBottom: 12,
-  },
-
-  infoText: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: COLORS.text,
-  },
-
-  inlineAction: {
+  setupInlineBtnText: {
+    fontSize: 11,
     color: COLORS.blue,
     fontWeight: '800',
-    fontSize: 12,
-    marginTop: 9,
   },
-
-  primaryButton: {
-    backgroundColor: COLORS.blue,
-    borderRadius: 13,
-    minHeight: 52,
+  radioCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 9,
+    marginLeft: 6,
+  },
+  radioCircleSelected: {
+    borderColor: COLORS.blue,
+  },
+  radioDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: COLORS.blue,
+  },
+  photoPreview: {
+    width: '100%',
+    height: 240,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#0A1A2F',
+    justifyContent: 'flex-end',
+    marginBottom: 12,
+  },
+  previewImage: {
+    borderRadius: 16,
+  },
+  photoLoadStatus: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoLoadStatusText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '700',
     marginTop: 8,
   },
-
-  primaryButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.white,
-    borderRadius: 13,
-    minHeight: 48,
+  photoLoadError: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 9,
-    marginTop: 12,
+    padding: 16,
   },
-
-  secondaryButtonText: {
-    color: COLORS.navy,
+  photoLoadErrorText: {
+    color: '#FCA5A5',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  photoTimestamp: {
+    backgroundColor: 'rgba(6, 23, 43, 0.82)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+  },
+  photoTimestampDate: {
+    color: COLORS.white,
     fontSize: 13,
     fontWeight: '800',
+    letterSpacing: 0.3,
   },
-
-  buttonDisabled: {
-    opacity: 0.65,
+  photoTimestampNote: {
+    color: '#94A3B8',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 2,
   },
-
-  photoPreview: {
-    position: 'relative',
-    width: '100%',
-    height: 280,
-    overflow: 'hidden',
+  photoButtonGroup: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  primarySubmitBtn: {
+    flex: 1,
+    marginTop: 0,
+  },
+  primaryButton: {
+    height: 52,
+    backgroundColor: COLORS.navy,
     borderRadius: 14,
-    marginTop: 12,
-    backgroundColor: '#E7EDF3',
-  },
-
-  previewImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
-
-  photoLoadStatus: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(11, 31, 51, 0.68)',
-    zIndex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    elevation: 3,
+    shadowColor: COLORS.navy,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
   },
-
-  photoLoadStatusText: {
-    fontSize: 12,
-    color: COLORS.white,
-    fontWeight: '700',
-    marginTop: 8,
-  },
-
-  photoLoadError: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    top: 12,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: COLORS.redLight,
-    zIndex: 2,
-  },
-
-  photoLoadErrorText: {
-    fontSize: 11,
-    color: COLORS.red,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-
-  photoTimestamp: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    backgroundColor: 'rgba(11, 31, 51, 0.82)',
-    zIndex: 2,
-  },
-
-  photoTimestampDate: {
+  primaryButtonText: {
     fontSize: 14,
+    fontWeight: '800',
     color: COLORS.white,
+    letterSpacing: 0.3,
+  },
+  secondaryButton: {
+    height: 52,
+    paddingHorizontal: 16,
+    borderColor: COLORS.border,
+    borderWidth: 1.2,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+  },
+  secondaryButtonText: {
+    fontSize: 13,
+    color: COLORS.navy,
     fontWeight: '800',
   },
-
-  photoTimestampNote: {
-    fontSize: 9,
-    color: '#D9E2EC',
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    marginTop: 3,
+  buttonDisabled: {
+    opacity: 0.55,
   },
-
-  photoUriDiagnostic: {
-    fontSize: 9,
-    color: COLORS.muted,
-    marginTop: 6,
-  },
-
-  previewDisclaimer: {
-    fontSize: 10,
-    lineHeight: 15,
-    color: COLORS.muted,
-    marginTop: 9,
-  },
-
   privacyNote: {
+    fontSize: 11,
     color: COLORS.muted,
-    textAlign: 'center',
-    fontSize: 10,
-    lineHeight: 15,
+    lineHeight: 16,
     marginTop: 12,
+    textAlign: 'center',
   },
-
-  errorBanner: {
-    backgroundColor: COLORS.redLight,
-    borderColor: '#FECDCA',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 13,
+  successCard: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#86EFAC',
+    borderWidth: 1.5,
+    borderRadius: 20,
+    padding: 20,
     marginTop: 14,
+    alignItems: 'center',
   },
-
-  errorText: {
-    color: COLORS.red,
+  successIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  successTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#15803D',
+    textAlign: 'center',
+  },
+  successDescription: {
     fontSize: 12,
-    lineHeight: 18,
+    color: '#166534',
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 14,
   },
-
-  infoCard: {
+  successDetailsBox: {
     backgroundColor: COLORS.white,
-    borderRadius: 15,
-    padding: 16,
-    marginTop: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.blue,
+    borderRadius: 14,
+    padding: 14,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    marginBottom: 14,
   },
-
-  infoTitle: {
+  successDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  successDetailLabel: {
+    fontSize: 12,
+    color: COLORS.muted,
+    fontWeight: '600',
+  },
+  successDetailValue: {
     fontSize: 13,
     color: COLORS.text,
     fontWeight: '800',
-    marginBottom: 6,
   },
-
+  dismissSuccessBtn: {
+    backgroundColor: '#15803D',
+    borderRadius: 12,
+    height: 44,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dismissSuccessBtnText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    elevation: 2,
+    shadowColor: COLORS.navyDark,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    gap: 12,
+  },
+  infoIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: COLORS.blueLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginBottom: 3,
+  },
   infoDescription: {
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.muted,
-    lineHeight: 18,
+    lineHeight: 16,
+  },
+  completedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    borderRadius: 20,
+    padding: 16,
+    marginTop: 14,
+    gap: 12,
+  },
+  completedIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completedCopy: {
+    flex: 1,
+  },
+  completedTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  completedSubtitle: {
+    fontSize: 11,
+    color: '#166534',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  historyHeaderBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  historyLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  historyLinkLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  historyLinkText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.blue,
   },
 });

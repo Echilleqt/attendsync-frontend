@@ -35,7 +35,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>ATTENDSYNC uses the camera to capture attendance proof after successful verification.</string>
+	<string>ATTENDSYNC uses the camera for attendance proof and live face recognition with a blink check.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>ATTENDSYNC uses device biometric authentication to protect your attendance signing key.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

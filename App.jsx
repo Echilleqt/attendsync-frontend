@@ -3,8 +3,10 @@ import React, {useState} from 'react';
 
 import {Alert} from 'react-native';
 
+import {SafeAreaProvider} from 'react-native-safe-area-context';
+
 import AppNavigator from './src/navigation/AppNavigator';
-import {API_URL, apiRequest} from './src/api/client';
+import {apiRequest} from './src/api/client';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -12,27 +14,27 @@ export default function App() {
   const [token, setToken] = useState(null);
   const [biometricStatus, setBiometricStatus] = useState(null);
 
+  React.useEffect(() => {
+    if (token && !employee) {
+      apiRequest('/me', token)
+        .then(res => {
+          if (res.employee) {
+            setEmployee(res.employee);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [token, employee]);
+
   const handleLogin = async (email, password) => {
     try {
-      const response = await fetch(`${API_URL}/login`, {
+      const data = await apiRequest('/login', null, {
         method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+        body: {
           email: email.trim(),
           password: password,
-        }),
+        },
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.message || 'Invalid email or password.',
-        );
-      }
 
       const receivedToken = data.access_token || data.token;
 
@@ -100,14 +102,16 @@ export default function App() {
   };
 
   return (
-    <AppNavigator
-      isLoggedIn={user !== null && token !== null}
-      user={user}
-      employee={employee}
-      token={token}
-      biometricStatus={biometricStatus}
-      onLogin={handleLogin}
-      onLogout={handleLogout}
-    />
+    <SafeAreaProvider>
+      <AppNavigator
+        isLoggedIn={user !== null && token !== null}
+        user={user}
+        employee={employee}
+        token={token}
+        biometricStatus={biometricStatus}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      />
+    </SafeAreaProvider>
   );
 }

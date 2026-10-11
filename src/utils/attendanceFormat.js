@@ -39,3 +39,43 @@ export function formatAttendanceTime(value) {
     hour12: true,
   }).format(date)} PHT`;
 }
+
+export function formatAttendanceDateTime(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const datePart = new Intl.DateTimeFormat('en-US', {
+    timeZone: MANILA_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+
+  const timePart = new Intl.DateTimeFormat('en-US', {
+    timeZone: MANILA_TIME_ZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
+
+  return `${datePart} · ${timePart}`;
+}
+
+export function formatOfficialRecordTimestamp(attendance, type = 'time_in') {
+  if (!attendance) {
+    return null;
+  }
+  const timeField = type === 'time_out' ? attendance.time_out : attendance.time_in;
+  if (!timeField) {
+    return null;
+  }
+  return formatAttendanceDateTime(timeField);
+}
+
