@@ -14,6 +14,8 @@ import HistoryScreen from '../screens/HistoryScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FaceRecognitionScreen from '../screens/FaceRecognitionScreen';
 import AttendanceHistoryScreen from '../screens/AttendanceHistoryScreen';
+import NetworkLockScreen from '../screens/NetworkLockScreen';
+import {useNetworkRestriction} from '../context/NetworkRestrictionContext';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -171,6 +173,9 @@ export default function AppNavigator({
   onLogin,
   onLogout,
 }) {
+  const {status} = useNetworkRestriction();
+  const isLocked = isLoggedIn && status !== 'authorized';
+
   return (
     <NavigationContainer theme={appTheme}>
       <Stack.Navigator
@@ -185,6 +190,14 @@ export default function AppNavigator({
               <LoginScreen
                 {...props}
                 onLogin={onLogin}
+              />
+            )}
+          </Stack.Screen>
+        ) : isLocked ? (
+          <Stack.Screen name="NetworkLock">
+            {() => (
+              <NetworkLockScreen
+                onLogout={onLogout}
               />
             )}
           </Stack.Screen>

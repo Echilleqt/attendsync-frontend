@@ -18,6 +18,40 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
+let currentNetworkHeaders = {
+  type: null,
+  ssid: null,
+  bssid: null,
+};
+
+let networkDeniedListener = null;
+
+let currentDeviceId = null;
+
+export function setDeviceId(id) {
+  currentDeviceId = id;
+}
+
+export function getDeviceId() {
+  return currentDeviceId;
+}
+
+export function updateNetworkHeaders(info = {}) {
+  currentNetworkHeaders = {
+    ...currentNetworkHeaders,
+    ...info,
+  };
+}
+
+export function onNetworkDenied(listener) {
+  networkDeniedListener = listener;
+  return () => {
+    if (networkDeniedListener === listener) {
+      networkDeniedListener = null;
+    }
+  };
+}
+
 export async function apiRequest(path, token, options = {}) {
   const isMultipart = options.body instanceof FormData;
   const defaultTimeout = isMultipart ? 45000 : 15000;
@@ -28,6 +62,20 @@ export async function apiRequest(path, token, options = {}) {
     'ngrok-skip-browser-warning': 'true',
     ...headers,
   };
+
+  if (currentDeviceId) {
+    requestHeaders['X-Device-Id'] = currentDeviceId;
+  }
+
+  if (currentNetworkHeaders.type) {
+    requestHeaders['X-Network-Type'] = currentNetworkHeaders.type;
+  }
+  if (currentNetworkHeaders.ssid) {
+    requestHeaders['X-Network-SSID'] = currentNetworkHeaders.ssid;
+  }
+  if (currentNetworkHeaders.bssid) {
+    requestHeaders['X-Network-BSSID'] = currentNetworkHeaders.bssid;
+  }
 
   if (token) {
     requestHeaders.Authorization = `Bearer ${token}`;
@@ -70,6 +118,15 @@ export async function apiRequest(path, token, options = {}) {
   }
 
   const data = await response.json().catch(() => ({}));
+
+  if (response.status === 403 && (data.error_code === 'NETWORK_NOT_AUTHORIZED' || data.error_code === 'NETWORK_VERIFICATION_UNAVAILABLE')) {
+    if (typeof networkDeniedListener === 'function') {
+      networkDeniedListener(data);
+    }
+    const netErr = new Error(data.message || 'Access denied by school network restriction policy.');
+    netErr.code = data.error_code;
+    throw netErr;
+  }
 
   if (!response.ok) {
     if (response.status === 404 && path.includes('/face/verify')) {

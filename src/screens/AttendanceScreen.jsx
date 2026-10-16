@@ -36,6 +36,9 @@ import AppHeader from '../components/AppHeader';
 import StatusBadge from '../components/StatusBadge';
 import Banner from '../components/Banner';
 import AttendanceCameraModal from '../components/AttendanceCameraModal';
+import NetworkStatusBanner from '../components/NetworkStatusBanner';
+import {useNetworkRestriction} from '../context/NetworkRestrictionContext';
+import {checkDeviceApproval, getDeviceUuid, submitDeviceRegistration} from '../services/deviceSecurity';
 
 const biometrics = new ReactNativeBiometrics({
   allowDeviceCredentials: false,
@@ -43,11 +46,18 @@ const biometrics = new ReactNativeBiometrics({
 
 export default function AttendanceScreen({token, navigation}) {
   const insets = useSafeAreaInsets();
+  const {status: networkStatus, denialReason: networkDenialReason, recheckNetwork} =
+    useNetworkRestriction();
 
   // Core Attendance State
   const [attendance, setAttendance] = useState(null);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
   const [refreshError, setRefreshError] = useState('');
+
+  // Device Authorization State (Step 4)
+  const [deviceStatus, setDeviceStatus] = useState({registered: true, status: 'approved'});
+  const [registeringDevice, setRegisteringDevice] = useState(false);
+  const [deviceNotice, setDeviceNotice] = useState('');
 
   // Biometric Enrollment States
   const [credentials, setCredentials] = useState([]);
@@ -211,9 +221,26 @@ export default function AttendanceScreen({token, navigation}) {
     }
   }, [token]);
 
+  const loadDeviceStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await checkDeviceApproval(token);
+      setDeviceStatus(res);
+      if (res.status === 'pending') {
+        setDeviceNotice('This mobile device is pending administrator approval before attendance can be recorded.');
+      } else if (res.status === 'revoked') {
+        setDeviceNotice('This device has been revoked by the school administrator.');
+      } else {
+        setDeviceNotice('');
+      }
+    } catch {
+      // Keep optimistic
+    }
+  }, [token]);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadToday(), loadBiometricCredentials(), loadFaceStatus()]);
-  }, [loadToday, loadBiometricCredentials, loadFaceStatus]);
+    await Promise.all([loadToday(), loadBiometricCredentials(), loadFaceStatus(), loadDeviceStatus()]);
+  }, [loadToday, loadBiometricCredentials, loadFaceStatus, loadDeviceStatus]);
 
   useFocusEffect(
     useCallback(() => {
@@ -221,11 +248,59 @@ export default function AttendanceScreen({token, navigation}) {
     }, [refreshAll]),
   );
 
-  // Determine current transaction type
-  const hasTimeIn = Boolean(attendance?.time_in);
-  const hasTimeOut = Boolean(attendance?.time_out);
-  const currentAction = hasTimeIn ? 'time-out' : 'time-in';
-  const actionLabel = currentAction === 'time-out' ? 'Time Out' : 'Time In';
+  // Determine four-entry attendance state
+  const amIn = attendance?.am_time_in || attendance?.time_in;
+  const amOut = attendance?.am_time_out;
+  const pmIn = attendance?.pm_time_in;
+  const pmOut = attendance?.pm_time_out || (attendance?.am_time_out ? null : attendance?.time_out);
+
+  const getPendingAction = () => {
+    if (!amIn) {
+      return {
+        action: 'morning_in',
+        label: 'Morning Time In',
+        slotLabel: 'Morning Arrival (AM)',
+        targetTime: 'Target: 8:00 AM',
+      };
+    }
+    if (!amOut) {
+      return {
+        action: 'morning_out',
+        label: 'Morning Time Out',
+        slotLabel: 'Morning Departure (AM)',
+        targetTime: 'Target: 12:00 PM',
+      };
+    }
+    if (!pmIn) {
+      return {
+        action: 'afternoon_in',
+        label: 'Afternoon Time In',
+        slotLabel: 'Afternoon Arrival (PM)',
+        targetTime: 'Target: 1:00 PM',
+      };
+    }
+    if (!pmOut) {
+      return {
+        action: 'afternoon_out',
+        label: 'Afternoon Time Out',
+        slotLabel: 'Afternoon Departure (PM)',
+        targetTime: 'Target: 5:00 PM',
+      };
+    }
+    return {
+      action: 'complete',
+      label: 'Attendance Complete',
+      slotLabel: 'All 4 Entries Recorded',
+      targetTime: 'Completed for Today',
+    };
+  };
+
+  const pendingInfo = getPendingAction();
+  const currentAction = pendingInfo.action;
+  const actionLabel = pendingInfo.label;
+  const isComplete = currentAction === 'complete';
+  const hasTimeIn = Boolean(amIn);
+  const hasTimeOut = isComplete;
 
   // STEP 1: Handle method selection and reset token if method changes
   const handleSelectMethod = method => {
@@ -236,6 +311,34 @@ export default function AttendanceScreen({token, navigation}) {
       setVerificationSuccessNotice('');
       setSubmissionError('');
     }
+  };
+
+  // Device registration handler using existing face template
+  const handleRegisterDeviceWithFace = () => {
+    navigation.navigate('FaceRecognition', {
+      isEnroll: false,
+      onVerified: async response => {
+        const faceToken = response?.face_verification_token;
+        if (!faceToken) {
+          setSubmissionError('Face verification failed. Device registration was not submitted.');
+          return;
+        }
+
+        setRegisteringDevice(true);
+        try {
+          const regRes = await submitDeviceRegistration(token, faceToken);
+          setDeviceStatus({registered: true, status: 'pending'});
+          setDeviceNotice(regRes.message || 'Device registration submitted! Awaiting administrator approval.');
+        } catch (err) {
+          setSubmissionError(err.message || 'Unable to register device with server.');
+        } finally {
+          setRegisteringDevice(false);
+        }
+      },
+      onCancelled: () => {
+        setSubmissionError('Device registration cancelled.');
+      },
+    });
   };
 
   const handleTriggerAction = () => {
@@ -253,17 +356,25 @@ export default function AttendanceScreen({token, navigation}) {
       return;
     }
 
-    // Business validations before verification
-    if (currentAction === 'time-in' && attendance?.time_in) {
-      setSubmissionError('Time In has already been recorded for today.');
+    if (networkStatus && networkStatus !== 'authorized') {
+      setSubmissionError(
+        networkDenialReason ||
+          'School network required. Please connect to the authorized school Wi-Fi network before verifying biometrics.',
+      );
       return;
     }
-    if (currentAction === 'time-out' && attendance?.time_out) {
-      setSubmissionError('Time Out has already been recorded for today.');
+
+    if (isComplete) {
+      setSubmissionError('All four attendance entries for today have already been completed.');
       return;
     }
-    if (currentAction === 'time-out' && !attendance?.time_in) {
-      setSubmissionError('Time In must be recorded before Time Out can be submitted.');
+
+    if (deviceStatus?.status === 'pending') {
+      setSubmissionError('Device registration is pending administrator approval before attendance can be submitted.');
+      return;
+    }
+    if (deviceStatus?.status === 'revoked') {
+      setSubmissionError('This device has been revoked by the administrator. Contact your school head.');
       return;
     }
 
@@ -429,6 +540,14 @@ export default function AttendanceScreen({token, navigation}) {
 
   // STEP 5: Confirm & Submit Attendance to Laravel
   const submitAttendance = async () => {
+    if (networkStatus && networkStatus !== 'authorized') {
+      setSubmissionError(
+        networkDenialReason ||
+          'School network required. Attendance cannot be recorded while disconnected from the authorized school network.',
+      );
+      return;
+    }
+
     if (!verificationToken || !capturedPhoto) {
       setSubmissionError(
         'Please complete biometric verification and capture an attendance photo proof first.',
@@ -440,7 +559,6 @@ export default function AttendanceScreen({token, navigation}) {
     setSubmissionError('');
 
     try {
-      const isTimeOut = pendingAttendanceAction === 'time-out';
       const body = new FormData();
 
       body.append('verification_method', verifiedMethod || selectedMethod);
@@ -457,8 +575,20 @@ export default function AttendanceScreen({token, navigation}) {
         type: capturedPhoto.type || 'image/jpeg',
       });
 
+      let endpoint = '/attendance/record';
+      if (pendingAttendanceAction === 'morning_in') endpoint = '/attendance/morning-in';
+      else if (pendingAttendanceAction === 'morning_out') endpoint = '/attendance/morning-out';
+      else if (pendingAttendanceAction === 'afternoon_in') endpoint = '/attendance/afternoon-in';
+      else if (pendingAttendanceAction === 'afternoon_out') endpoint = '/attendance/afternoon-out';
+      else if (pendingAttendanceAction === 'time-out') endpoint = '/attendance/time-out';
+      else if (pendingAttendanceAction === 'time-in') endpoint = '/attendance/time-in';
+
+      if (pendingAttendanceAction) {
+        body.append('entry_type', pendingAttendanceAction);
+      }
+
       const submission = await apiRequest(
-        isTimeOut ? '/attendance/time-out' : '/attendance/time-in',
+        endpoint,
         token,
         {
           method: 'POST',
@@ -469,23 +599,33 @@ export default function AttendanceScreen({token, navigation}) {
 
       const saved = submission.attendance;
 
-      if (
-        !saved?.attendance_date ||
-        !saved?.time_in ||
-        (isTimeOut ? !saved?.time_out : !saved?.status)
-      ) {
+      if (!saved?.attendance_date) {
         throw new Error(
-          `The server did not return the official saved ${
-            isTimeOut ? 'Time Out' : 'Time In'
-          } record. Refresh attendance to confirm.`,
+          'The server did not return the official saved record. Refresh attendance to confirm.',
         );
       }
+
+      const actionLabels = {
+        morning_in: 'Morning Time In',
+        morning_out: 'Morning Time Out',
+        afternoon_in: 'Afternoon Time In',
+        afternoon_out: 'Afternoon Time Out',
+        'time-in': 'Time In',
+        'time-out': 'Time Out',
+      };
+      const displayAction = actionLabels[pendingAttendanceAction] || actionLabel;
+      const officialTimestamp =
+        (pendingAttendanceAction === 'morning_in' && (saved.am_time_in || saved.time_in)) ||
+        (pendingAttendanceAction === 'morning_out' && saved.am_time_out) ||
+        (pendingAttendanceAction === 'afternoon_in' && saved.pm_time_in) ||
+        (pendingAttendanceAction === 'afternoon_out' && (saved.pm_time_out || saved.time_out)) ||
+        saved.time_in;
 
       // Success cleanup
       setAttendance(saved);
       setSubmissionSuccessRecord({
-        action: isTimeOut ? 'Time Out' : 'Time In',
-        officialTimestamp: isTimeOut ? saved.time_out : saved.time_in,
+        action: displayAction,
+        officialTimestamp: officialTimestamp,
         status: saved.status,
         method: verifiedMethod || selectedMethod,
       });
@@ -510,7 +650,11 @@ export default function AttendanceScreen({token, navigation}) {
   const formattedDate = formatAttendanceDate(attendance?.attendance_date);
   const formattedTimeIn = formatAttendanceTime(attendance?.time_in);
   const formattedTimeOut = formatAttendanceTime(attendance?.time_out);
-  const hasOfficialTimestamp = Boolean(formattedDate && formattedTimeIn);
+  const formattedAmIn = formatAttendanceTime(amIn);
+  const formattedAmOut = formatAttendanceTime(amOut);
+  const formattedPmIn = formatAttendanceTime(pmIn);
+  const formattedPmOut = formatAttendanceTime(pmOut);
+  const hasOfficialTimestamp = Boolean(formattedDate && (formattedAmIn || formattedTimeIn));
 
   // Can verify check for the currently selected method
   const isMethodReady =
@@ -574,6 +718,8 @@ export default function AttendanceScreen({token, navigation}) {
         />
 
         <View style={styles.body}>
+          <NetworkStatusBanner />
+
           {/* Today's Official Record Hero Card */}
           <View style={styles.recordCard}>
             <View style={styles.recordHeader}>

@@ -33,6 +33,7 @@ import COLORS from '../theme/colors';
 import AppHeader from '../components/AppHeader';
 import StatusBadge from '../components/StatusBadge';
 import Banner from '../components/Banner';
+import NetworkStatusBanner from '../components/NetworkStatusBanner';
 
 export default function DashboardScreen({navigation, token, user, employee}) {
   const insets = useSafeAreaInsets();
@@ -150,6 +151,8 @@ export default function DashboardScreen({navigation, token, user, employee}) {
 
         {/* Main Body */}
         <View style={styles.body}>
+          <NetworkStatusBanner />
+
           {/* Today's Daily Attendance Hero Card */}
           <View style={styles.recordCard}>
             <View style={styles.recordHeading}>

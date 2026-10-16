@@ -7,6 +7,7 @@ import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 import AppNavigator from './src/navigation/AppNavigator';
 import {apiRequest} from './src/api/client';
+import {NetworkRestrictionProvider} from './src/context/NetworkRestrictionContext';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -103,15 +104,20 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AppNavigator
-        isLoggedIn={user !== null && token !== null}
-        user={user}
-        employee={employee}
+      <NetworkRestrictionProvider
         token={token}
-        biometricStatus={biometricStatus}
-        onLogin={handleLogin}
-        onLogout={handleLogout}
-      />
+        isLoggedIn={user !== null && token !== null}
+      >
+        <AppNavigator
+          isLoggedIn={user !== null && token !== null}
+          user={user}
+          employee={employee}
+          token={token}
+          biometricStatus={biometricStatus}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
+      </NetworkRestrictionProvider>
     </SafeAreaProvider>
   );
 }
